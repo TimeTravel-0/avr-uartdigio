@@ -1,5 +1,6 @@
 
-#define F_CPU 32768UL //32kHz quartz crystal
+//#define F_CPU 32768UL //32kHz quartz crystal
+#define F_CPU 3686400L // 3.6864MHz quartz crystal makes a great source for UART frequencies
 
 #include <avr/io.h>
 #include <util/delay.h>
@@ -42,12 +43,85 @@ FUSES =
 };
 
 
+// uart RX buf
+
+char _ReceiveBuffer[100];
+unsigned char _ReceiveBufferPos=0;
+
 
 uint8_t prbs(void)
 {
     static uint32_t sequence = 1; // initial value
     sequence = sequence << 1 |  (((sequence >> 30) ^ (sequence >> 27)) & 1); // prbs calculation
     return sequence & 0x01; // return a bit
+}
+
+void config_uart(void)
+{
+    
+    #define USART_BAUDRATE 9600 
+    #define BAUD_PRESCALE (((F_CPU / (USART_BAUDRATE * 16UL))) - 1)
+    
+    // Enable USART receiver and transmitter
+	UCSRB |= (1 << RXEN) | (1 << TXEN);
+	
+	// Set baud rate bits
+	UBRRH = (BAUD_PRESCALE >> 8);
+	UBRRL = BAUD_PRESCALE;
+}
+
+void USART_Transmit( unsigned char data )
+{
+    /* Wait for empty transmit buffer */
+    while ( !( UCSRA & (1<<UDRE)) );
+    /* Put data into buffer, sends the data */
+    UDR = data;
+}
+
+void uart_string(char* p)
+{
+    while(*p!=0)
+    {
+        USART_Transmit(*p++);
+    }
+}
+
+void cmd_interpreter()
+{
+    if(_ReceiveBuffer[_ReceiveBufferPos-1]!='\r') return;
+    _ReceiveBuffer[_ReceiveBufferPos]=0;
+    _ReceiveBufferPos=0;
+    uart_string("\n\r");
+    
+    
+    unsigned char state=0;
+    // different modes
+    switch(_ReceiveBuffer[0])
+    {
+        
+        case '?':
+            uart_string("wat?");
+            state=1;
+            break;
+        case 'L':
+            PORTD^= ( 1 << PD2 ); // toggle LED just because we can
+            state=1;
+            break;
+        default:
+            state=0;
+    }
+    
+    if(state==1)
+    {
+        uart_string("OK");
+    }
+    else
+    {
+        uart_string("ERR"); 
+    }
+    
+    uart_string("\n\r>");
+    return;
 }
 
 void config_io_pins(void)
@@ -57,26 +131,10 @@ void config_io_pins(void)
     DDRD |= (1 << PD1); // h bridge 2
     DDRD |= (1 << PD2); // second ticker (toggles every second)
     DDRD |= (1 << PD3); // flicker output, prbs driven
+    DDRD |= (1 << PD4); // flicker output, prbs driven
+    DDRD |= (1 << PD5); // flicker output, prbs driven
+    
 }
-
-void output_positive(void) // H bridge pos.
-{
-    PORTD |= (1 << PD0); // set this pin high
-    PORTD &=~(1 << PD1); // set this pin low
-}
-
-void output_negative(void) // H bridge neg.
-{
-    PORTD &=~(1 << PD0); // set this pin low
-    PORTD |= (1 << PD1); // set this pin high
-}
-
-void output_zero(void) // H bridge off
-{
-    PORTD &=~(1 << PD0); // set this pin low
-    PORTD &=~(1 << PD1); // set this pin low
-}
-
 // finite state machine
 void fsm(void)
 {
@@ -85,16 +143,16 @@ void fsm(void)
     switch(state)
     {
         case 0: // sate 0
-            output_positive();
+            //output_positive();
             state=1; // go to state 1 next
             break;
         case 2: // state 2
         case 62: // state 62
-            output_zero();
+            //output_zero();
             state=state+1; // go to next state
             break;
         case 60: // state 60
-            output_negative();
+            //output_negative();
             state=61; // go to state 61 next
             break;
         case 119: // state 119
@@ -131,6 +189,13 @@ void config_interrupts(void)
     // The counter value (TCNT0) increases until a Compare Match occurs
     // between TCNT0 and OCR0A, and then counter (TCNT0) is cleared.
     OCR0A = 0x7f; // half way up
+    
+    
+    // Enable USART Receive Complete interrupt
+	UCSRB |= (1 << RXCIE);
+	UCSRB |= (1 << TXCIE);
+	UCSRB |= (1 << UDRIE);
+    
 
 
     sei(); // enable global interrupts
@@ -140,8 +205,28 @@ void config_interrupts(void)
 ISR(TIMER0_COMPA_vect)
 {
     fsm();
-    PORTD^= ( 1 << PD2 ); // toggle bit to show step
+//    PORTD^= ( 1 << PD2 ); // toggle bit to show step
 
+}
+
+ISR(USART_RX_vect)
+{ 
+    // echo!
+    char receivedByte;
+    receivedByte = UDR;
+    UDR=receivedByte; 
+    if(_ReceiveBufferPos<100)
+    {
+        _ReceiveBuffer[_ReceiveBufferPos++]=receivedByte; // write to buffer until it is full
+    }
+}
+
+ISR(USART_TX_vect)
+{    
+}
+
+ISR(USART_UDRE_vect)
+{
 }
 
 
@@ -149,35 +234,15 @@ int main(void)
 {
     config_io_pins();
     config_interrupts();
+    config_uart();
+    
+    uart_string("AVRSPICTRL\n\r");
 
 
     while(1)
     {
-
-        // flicker an LED just because we can (and to simulate a neon tube for flip clocks ;)
-        if(prbs()) // 50% certaincy to switch LED on
-        {
-            PORTD&= ~( 1 << PD3 ); // set
-        }
-        else // 50 %
-        {
-            if(prbs() && prbs() && prbs() ) // 0.5 * 0.5 * 0.5 = 6.25 % certaincy to switch LED off
-            {
-                PORTD|= ( 1 << PD3 ); // reset
-            }
-        }
-
-        // delay random delay times to make flicker more realistic
-        _delay_ms(1); // wait 1ms, because smaller values make no sense (not visible to eye)
-        if(prbs()) // 50% certaincy for 5ms delay
-        {
-            _delay_ms(5);
-        }
-        if(prbs()) // 50% certaincy for 19ms delay
-        {
-            _delay_ms(19);
-        }
-
+        cmd_interpreter();
+        
     } // interesting stuff happens in ISRs.
 
     return 0;
