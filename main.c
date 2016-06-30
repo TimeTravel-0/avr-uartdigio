@@ -1,5 +1,4 @@
 
-//#define F_CPU 32768UL //32kHz quartz crystal
 #define F_CPU 3686400L // 3.6864MHz quartz crystal makes a great source for UART frequencies
 
 #include <avr/io.h>
@@ -8,17 +7,14 @@
 #include <avr/interrupt.h>
 
 /*
-#    avr runs on 32768 Hz clock crystal (XTAL pins)
+#    avr runs on 3.6864MHz quartz crystal (XTAL pins)
 #
 #    basic function is as follows:
 #
 #    while true:
-#        sleep 50 seconds
-#        create positive pulse (one of the two outputs high, the other low) across H bridge for 10 seconds
-#        sleep 50 seconds
-#        create negative pulse (one of the two outputs low, the other high) across H bridge for 10 seconds
-#
-#   (low prio meanwhile: flicker with pin/LED for fun)
+#        watch out for commands from UART
+#        the user wants to set one of the many attached SPI port expander bits? (decode...)
+#        craft SPI message and send it out
 #
 */
 
@@ -48,6 +44,7 @@ FUSES =
 char _ReceiveBuffer[100];
 unsigned char _ReceiveBufferPos=0;
 
+// pseudo random number generator (do we still need this???)
 
 uint8_t prbs(void)
 {
@@ -127,15 +124,16 @@ void cmd_interpreter()
 void config_io_pins(void)
 {
     // set these pins as output
-    DDRD |= (1 << PD0); // h bridge 1
-    DDRD |= (1 << PD1); // h bridge 2
-    DDRD |= (1 << PD2); // second ticker (toggles every second)
-    DDRD |= (1 << PD3); // flicker output, prbs driven
-    DDRD |= (1 << PD4); // flicker output, prbs driven
-    DDRD |= (1 << PD5); // flicker output, prbs driven
+    DDRD |= (1 << PD0); // RX pin, propably makes no sense to set this here?
+    DDRD |= (1 << PD1); // TX pin, propably makes no sense to set this here?
+    DDRD |= (1 << PD2); // ?
+    DDRD |= (1 << PD3); // ?
+    DDRD |= (1 << PD4); // ?
+    DDRD |= (1 << PD5); // ?
     
 }
-// finite state machine
+
+// finite state machine, doing nothing right now! might later be used to trigger events on timing basis (if we really need "realtime" stuff).
 void fsm(void)
 {
     static uint8_t state=0;
@@ -166,6 +164,10 @@ void fsm(void)
 
 void config_interrupts(void)
 {
+    
+    // NOTE: clock config calculation is all wrong due to changed XTAL frequency (32kHz to 3,something MHz).
+    // ----------------------------------------------
+    
     // clock input to AVR is 32768 Hz
     // timer 0 should fire at 1Hz
     // this means divide input clock by 2^15
@@ -201,10 +203,10 @@ void config_interrupts(void)
     sei(); // enable global interrupts
 }
 
-// called at 1Hz frequency
+// called at 1Hz frequency, now propably a bit faster
 ISR(TIMER0_COMPA_vect)
 {
-    fsm();
+    //fsm();
 //    PORTD^= ( 1 << PD2 ); // toggle bit to show step
 
 }
@@ -242,7 +244,6 @@ int main(void)
     while(1)
     {
         cmd_interpreter();
-        
     } // interesting stuff happens in ISRs.
 
     return 0;
