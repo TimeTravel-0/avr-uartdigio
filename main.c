@@ -67,7 +67,7 @@ void config_uart(void)
 	UBRRL = BAUD_PRESCALE;
 }
 
-void USART_Transmit( unsigned char data )
+void uart_transmit( unsigned char data )
 {
     /* Wait for empty transmit buffer */
     while ( !( UCSRA & (1<<UDRE)) );
@@ -79,9 +79,54 @@ void uart_string(char* p)
 {
     while(*p!=0)
     {
-        USART_Transmit(*p++);
+        uart_transmit(*p++);
     }
 }
+
+////////////////////////////////////////////////////////////////////////
+
+void config_spi()
+{
+    DDRB &= ~(1<<PB5); // Data input is an input
+    PORTB |= 1 << PB5; // enable pullup for DI
+
+    // Define the following pins as output // data outputs are outputs (d-oh!)
+    //DDR_SPI |= ((1<<USI_DO)|(1<<USI_SCK));
+}
+
+uint8_t spi_readWrite(uint8_t data)
+{
+  USIDR = data; // put data in output register
+  USISR |= 1 << USIOIF; // enable shift-out
+
+  while ((USISR & (1 << USIOIF)) == 0 ) { // while not finished
+    USICR = (1<<USIWM0)|(1<<USICS1)|(1<<USICLK)|(1<<USITC); // shift out
+  }
+
+  return USIDR; 
+}
+
+void spi_cs_low(uint8_t id)
+{
+    PORTB&= !( 1 << PB0 );
+}
+void spi_cs_high(uint8_t id)
+{
+    PORTB|= ( 1 << PB0 );
+    
+}
+
+uint8_t spi_mcp27s17(uint8_t dev_addr, uint8_t reg_addr, uint8_t data)
+{
+    spi_cs_low(0);
+    spi_readWrite(0b01000000|(dev_addr<<1));
+    spi_readWrite(reg_addr);    
+    spi_readWrite(data);    
+    spi_cs_high(0);
+    return 0;
+} 
+
+////////////////////////////////////////////////////////////////////////
 
 void cmd_interpreter()
 {
@@ -130,6 +175,11 @@ void config_io_pins(void)
     DDRD |= (1 << PD3); // ?
     DDRD |= (1 << PD4); // ?
     DDRD |= (1 << PD5); // ?
+    
+    // SPI
+    DDRB |= (1 << PB7); // ?
+    DDRB |= (1 << PB6); // ?
+    DDRB |= (1 << PB0); // ?
     
 }
 
@@ -234,16 +284,28 @@ ISR(USART_UDRE_vect)
 
 int main(void)
 {
+    
+    _delay_ms(50); // to give programmer time to interrupt and re-flash
+    
     config_io_pins();
     config_interrupts();
     config_uart();
     
     uart_string("AVRSPICTRL\n\r");
-
+    
+    uint16_t q=1;
 
     while(1)
     {
         cmd_interpreter();
+        
+        spi_mcp27s17(0,0x00,0); // register IODIR A set to OUTPUT (0)
+        spi_mcp27s17(0,0x01,0); // register IODIR B set to OUTPUT (0)
+        spi_mcp27s17(0,0x12,q&0xff);
+        spi_mcp27s17(0,0x13,(q>>8)&0xff);
+        _delay_ms(1);
+        q=q<<1;
+        if(!q)q=1;
     } // interesting stuff happens in ISRs.
 
     return 0;
