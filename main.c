@@ -293,17 +293,33 @@ int main(void)
     
     uart_string("AVRSPICTRL\n\r");
     
-    uint16_t q=1;
+    uint32_t q=1;
+
+    uint8_t z=0;
+
+    // prepare!
+    spi_mcp27s17(0,0x0A,0b00001000); // respect hardware adresses!
+        
+    spi_mcp27s17(0,0x00,0); // register IODIR A set to OUTPUT (0)
+    spi_mcp27s17(0,0x01,0); // register IODIR B set to OUTPUT (0)
+
+    spi_mcp27s17(1,0x00,0); // register IODIR A set to OUTPUT (0)
+    spi_mcp27s17(1,0x01,0); // register IODIR B set to OUTPUT (0)
 
     while(1)
     {
         cmd_interpreter();
         
-        spi_mcp27s17(0,0x00,0); // register IODIR A set to OUTPUT (0)
-        spi_mcp27s17(0,0x01,0); // register IODIR B set to OUTPUT (0)
-        spi_mcp27s17(0,0x12,q&0xff);
-        spi_mcp27s17(0,0x13,(q>>8)&0xff);
-        _delay_ms(1);
+        //spi_mcp27s17(0,0x05,0xff); // respect hardware adresses
+        
+        spi_mcp27s17(0,0x12,(q)&0xff); // first part of running light
+        spi_mcp27s17(0,0x13,(q>>8)&0xff); // 2nd part of running light
+        
+        spi_mcp27s17(1,0x12,(q>>24)&0xff); // 3rd part of running light
+        spi_mcp27s17(1,0x13,(q>>16)&0xff); // 4th part of running light
+        
+        //_delay_ms(1);
+        
         q=q<<1;
         if(!q)q=1;
     } // interesting stuff happens in ISRs.
